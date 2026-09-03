@@ -56,6 +56,11 @@ function hasValidRidePayload(
     return typeof data.rideId === "string" && data.rideId.length > 0;
 }
 
+// Socket.IO chat controller.
+// Each event below acts as a chat operation: it authenticates the socket,
+// validates the ride membership through the ride backend, and then performs
+// the requested room or message action. The frontend must use these events
+// instead of calling the ride database or inventing room names.
 export function registerChatSocket(io: Server): void {
     io.on("connection", (socket) => {
         let identity: ChatIdentity;
@@ -68,6 +73,7 @@ export function registerChatSocket(io: Server): void {
             return;
         }
 
+        // Chat route: join the authenticated user's ride room.
         socket.on("join_ride", async (data: RidePayload) => {
             try {
                 if (!hasValidRidePayload(data) || data.rideId !== identity.rideId) {
@@ -95,6 +101,7 @@ export function registerChatSocket(io: Server): void {
             }
         });
 
+        // Chat route: load the most recent messages for the ride room.
         socket.on("get_messages", async (data: RidePayload) => {
             try {
                 if (!hasValidRidePayload(data) || data.rideId !== identity.rideId) {
@@ -125,6 +132,7 @@ export function registerChatSocket(io: Server): void {
             }
         });
 
+        // Chat route: persist and broadcast a new message to the ride room.
         socket.on("send_message", async (data: RidePayload) => {
             try {
                 if (!hasValidRidePayload(data) || data.rideId !== identity.rideId) {
