@@ -72,7 +72,6 @@ server/
 ├── src/server.ts                      HTTP and Socket.IO startup
 ├── src/config/db.ts                   MongoDB connection
 ├── src/models/message.model.ts        Message schema
-├── src/routes/health.routes.ts        Health endpoint
 ├── src/services/rideBackend.service.ts
 └── src/sockets/chat.socket.ts         Socket.IO events and authorization
 ```
