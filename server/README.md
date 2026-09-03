@@ -9,6 +9,43 @@ The ride backend remains the source of truth for access. OueChat asks the
 ride backend to validate membership before a user can join a ride room, load
 messages, or send a message.
 
+## Chat integration flow
+
+The chat UI may be part of a consuming app's frontend, while OueChat runs as
+a separate chat microservice. The integration works in this order:
+
+```text
+1. Frontend → Ride backend
+   POST /api/chat/rides/:rideId/session
+   Authorization: Bearer <ride-app-token>
+
+2. Ride backend
+   - Verifies the logged-in user
+   - Checks the user's ride membership
+   - Creates a short-lived chatToken
+
+3. Frontend → OueChat
+   - Opens a Socket.IO connection using chatToken
+
+4. OueChat
+   - Verifies the chatToken signature using CHAT_TOKEN_SECRET
+   - Checks token expiry, audience, user ID, and ride ID
+   - Calls the ride backend internally:
+     POST /api/chat/membership/validate
+
+5. Ride backend
+   - Validates the current membership, ride status, and blacklist status
+   - Returns allowed: true or allowed: false
+
+6. OueChat
+   - Allows the user to join the ride room only when allowed is true
+   - Revalidates membership before loading or sending messages
+```
+
+The frontend must never call the internal membership endpoint directly. It
+only requests a chat session from the ride backend and uses the returned
+chatToken to connect to OueChat.
+
 ## Architecture
 
 ```text
