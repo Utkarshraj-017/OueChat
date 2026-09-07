@@ -1,3 +1,5 @@
+import { env } from "../config/env.js";
+
 interface MembershipResponse {
     allowed: boolean;
 }
@@ -6,8 +8,8 @@ export async function validateMembership(
     rideId: string,
     userId: string
 ): Promise<boolean> {
-    const backendUrl = process.env.RIDE_BACKEND_URL || "http://localhost:5000";
-    const serviceSecret = process.env.CHAT_SERVICE_SECRET;
+    const backendUrl = env.rideBackendUrl;
+    const serviceSecret = env.chatServiceSecret;
 
     if (!serviceSecret) {
         throw new Error("CHAT_SERVICE_SECRET is required");

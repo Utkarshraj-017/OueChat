@@ -1,12 +1,12 @@
 import "dotenv/config";
 import cors from "cors";
 import express from "express";
+import { env } from "./config/env.js";
 
 const app = express();
-const frontendOrigin = process.env.FRONTEND_URL || "http://localhost:5173";
 
 app.use(cors({
-    origin: frontendOrigin,
+    origin: env.frontendOrigin,
     credentials: true
 }));
 

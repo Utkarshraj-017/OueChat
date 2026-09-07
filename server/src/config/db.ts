@@ -1,12 +1,11 @@
 import mongoose from "mongoose";
+import { env } from "./env.js";
 
 export async function connectDB(): Promise<void> {
-    const mongoUri = process.env.CHAT_MONGODB_URI;
-
-    if (!mongoUri) {
+    if (!env.chatMongoUri) {
         throw new Error("CHAT_MONGODB_URI is required");
     }
 
-    await mongoose.connect(mongoUri);
+    await mongoose.connect(env.chatMongoUri);
     console.log("ouechat MongoDB connected");
 }

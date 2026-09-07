@@ -70,10 +70,18 @@ The current OueChat backend is a single independently deployable service:
 server/
 ├── src/app.ts                         Express application
 ├── src/server.ts                      HTTP and Socket.IO startup
-├── src/config/db.ts                   MongoDB connection
+├── src/config/
+│   ├── db.ts                          MongoDB connection
+│   └── env.ts                         Validated environment configuration
+├── src/middleware/socketAuth.ts       Socket authentication and identity parsing
 ├── src/models/message.model.ts        Message schema
-├── src/services/rideBackend.service.ts
-└── src/sockets/chat.socket.ts         Socket.IO events and authorization
+├── src/services/
+│   ├── chat.service.ts                Message and access operations
+│   └── rideBackend.service.ts         Ride membership API client
+├── src/sockets/
+│   ├── chat.socket.ts                 Socket.IO registration and composition
+│   └── chat.handlers.ts               Chat event handlers
+└── src/types/chat.types.ts            Shared chat payload types
 ```
 
 ## Requirements
@@ -106,6 +114,7 @@ Set these values in `.env`:
 | `RIDE_BACKEND_URL` | Yes | Base URL of the ride backend, without the `/api/chat` path. Example: `http://localhost:5000`. |
 | `CHAT_TOKEN_SECRET` | Yes | Must match the secret used by the trusted backend to sign chat tokens. |
 | `CHAT_SERVICE_SECRET` | Yes | Must match the secret accepted by the ride backend's internal membership endpoint. |
+| `CHAT_MEMBERSHIP_RECHECK_INTERVAL_MS` | No | How often an active socket revalidates membership. Defaults to `15000`. |
 
 Example:
 
@@ -316,6 +325,10 @@ socket.on("new_message", (message) => {
 socket.on("chat_error", ({ message }) => {
   console.error(message);
 });
+
+socket.on("chat_access_revoked", ({ rideId, message }) => {
+  console.warn(`Chat access revoked for ${rideId}: ${message}`);
+});
 ```
 
 ### Events
@@ -329,6 +342,7 @@ socket.on("chat_error", ({ message }) => {
 | Client to server | `send_message` | `{ rideId, text }` |
 | Server to room | `new_message` | `{ id, rideId, senderId, text, createdAt }` |
 | Server to client | `chat_error` | `{ message }` |
+| Server to client | `chat_access_revoked` | `{ rideId, message }` |
 
 Current limits:
 
@@ -337,6 +351,9 @@ Current limits:
   newest.
 - A user must join the room before sending a message.
 - Membership is revalidated before every join, read, and send operation.
+- After joining, membership is revalidated periodically. If the ride backend
+  returns `allowed: false`, OueChat emits `chat_access_revoked`, removes the
+  socket from the ride room, and disconnects it.
 
 The room name is derived by the server as `ride:<rideId>`. Clients should use
 the `roomId` returned by `joined_ride` for display only and must not attempt to
