@@ -67,7 +67,7 @@ Ride backend internal membership endpoint
 The current OueChat backend is a single independently deployable service:
 
 ```text
-server/
+OueChat/
 ├── src/app.ts                         Express application
 ├── src/server.ts                      HTTP and Socket.IO startup
 ├── src/config/

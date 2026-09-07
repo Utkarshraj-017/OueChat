@@ -1,17 +1,18 @@
 # OueChat
 
 OueChat is the chat microservice used by ride-based applications. The
-repository keeps the backend and the future standalone frontend separate:
+repository contains the independently deployable backend service:
 
 ```text
 OueChat/
-├── server/    TypeScript, Express, MongoDB, and Socket.IO backend
-└── client/    Frontend application (to be built)
+├── src/       TypeScript, Express, MongoDB, and Socket.IO backend
+├── package.json
+└── BACKEND.md Detailed backend integration and operations documentation
 ```
 
 ## Backend documentation
 
-Read [`server/README.md`](server/README.md) for the complete backend
+Read [`BACKEND.md`](BACKEND.md) for the complete backend
 documentation, including:
 
 - Environment variables and local setup
@@ -24,12 +25,11 @@ documentation, including:
 ## Start the backend locally
 
 ```powershell
-cd server
 npm install
 ```
 
-Create `server/.env` using the configuration described in
-[`server/README.md`](server/README.md), then run:
+Create `.env` using the configuration described in
+[`BACKEND.md`](BACKEND.md), then run:
 
 ```powershell
 npm run dev
@@ -41,4 +41,4 @@ The backend exposes its health check at:
 GET http://localhost:4000/health
 ```
 
-Never commit `server/.env` or expose its secrets to the frontend.
+Never commit `.env` or expose its secrets to a consuming frontend.
