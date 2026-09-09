@@ -1,13 +1,16 @@
 import Message from "../models/message.model.js";
-import { ChatIdentity, StoredMessage } from "../types/chat.types.js";
+import { StoredMessage } from "../types/chat.types.js";
 import { validateMembership } from "./rideBackend.service.js";
 
 const MAX_MESSAGE_LENGTH = 1000;
 
 export const roomName = (rideId: string): string => `ride:${rideId}`;
 
-export async function hasChatAccess(identity: ChatIdentity): Promise<boolean> {
-    return validateMembership(identity.rideId, identity.userId);
+export async function hasChatAccess(
+    rideId: string,
+    userId: string
+): Promise<boolean> {
+    return validateMembership(rideId, userId);
 }
 
 export async function getRecentMessages(
@@ -15,11 +18,11 @@ export async function getRecentMessages(
 ): Promise<StoredMessage[]> {
     const messages = await Message
         .find({ rideId })
-        .sort({ createdAt: 1 })
+        .sort({ createdAt: -1 })
         .limit(100)
         .lean();
 
-    return messages.map((message) => ({
+    return messages.reverse().map((message) => ({
         id: message._id.toString(),
         rideId: message.rideId,
         senderId: message.senderId,
@@ -29,7 +32,8 @@ export async function getRecentMessages(
 }
 
 export async function createMessage(
-    identity: ChatIdentity,
+    rideId: string,
+    userId: string,
     text: unknown
 ): Promise<StoredMessage> {
     if (typeof text !== "string" || !text.trim()) {
@@ -45,8 +49,8 @@ export async function createMessage(
     }
 
     const message = await Message.create({
-        rideId: identity.rideId,
-        senderId: identity.userId,
+        rideId,
+        senderId: userId,
         text: normalizedText
     });
 

@@ -2,7 +2,8 @@ import { Server, Socket } from "socket.io";
 import { env } from "../config/env.js";
 import {
     ChatIdentity,
-    RidePayload
+    RidePayload,
+    StoredMessage
 } from "../types/chat.types.js";
 import {
     createMessage,
@@ -15,58 +16,95 @@ function sendError(socket: Socket, message: string): void {
     socket.emit("chat_error", { message });
 }
 
-function hasValidRidePayload(
-    data: RidePayload | undefined
-): data is { rideId: string; text?: unknown } {
-    if (!data) {
-        return false;
-    }
-
-    return typeof data.rideId === "string" && data.rideId.length > 0;
+export interface ChatHandlerDependencies {
+    hasChatAccess: (rideId: string, userId: string) => Promise<boolean>;
+    getRecentMessages: (rideId: string) => Promise<StoredMessage[]>;
+    createMessage: (
+        rideId: string,
+        userId: string,
+        text: unknown
+    ) => Promise<StoredMessage>;
 }
 
-function revokeSocketAccess(
+const defaultDependencies: ChatHandlerDependencies = {
+    hasChatAccess,
+    getRecentMessages,
+    createMessage
+};
+
+function readRideId(data: RidePayload | undefined): string | null {
+    if (!data || typeof data.rideId !== "string") {
+        return null;
+    }
+
+    const rideId = data.rideId.trim();
+    return rideId.length > 0 ? rideId : null;
+}
+
+function revokeRideAccess(
     socket: Socket,
     rideId: string,
-    message: string
+    message: string,
+    joinedRideIds: Set<string>
 ): void {
     sendError(socket, message);
     socket.emit("chat_access_revoked", { rideId, message });
     socket.leave(roomName(rideId));
-    socket.disconnect(true);
+    joinedRideIds.delete(rideId);
 }
 
 function startMembershipRecheck(
     socket: Socket,
-    identity: ChatIdentity
+    identity: ChatIdentity,
+    joinedRideIds: Set<string>,
+    checkAccess: ChatHandlerDependencies["hasChatAccess"]
 ): () => void {
     let checking = false;
 
     const timer = setInterval(() => {
+        if (joinedRideIds.size === 0) {
+            clearInterval(timer);
+            return;
+        }
+
         if (checking || socket.disconnected) {
             return;
         }
 
         checking = true;
+        const rideIds = [...joinedRideIds];
 
-        void hasChatAccess(identity)
-            .then((allowed) => {
-                if (!allowed) {
-                    revokeSocketAccess(
-                        socket,
-                        identity.rideId,
-                        "Your access to this ride chat has been revoked"
+        void Promise.all(
+            rideIds.map(async (rideId) => {
+                try {
+                    const allowed = await checkAccess(
+                        rideId,
+                        identity.userId
+                    );
+
+                    if (!allowed && joinedRideIds.has(rideId)) {
+                        revokeRideAccess(
+                            socket,
+                            rideId,
+                            "Your access to this ride chat has been revoked",
+                            joinedRideIds
+                        );
+                    }
+                } catch (error) {
+                    // A temporary ride-backend failure should not revoke
+                    // every active room. Chat actions still validate access.
+                    const message = error instanceof Error
+                        ? error.message
+                        : "Unknown membership error";
+                    console.error(
+                        `Membership recheck error for ${rideId}:`,
+                        message
                     );
                 }
             })
-            .catch((error: Error) => {
-                // A temporary ride-backend failure should not revoke every
-                // active socket. New chat actions still validate access.
-                console.error("Membership recheck error:", error.message);
-            })
-            .finally(() => {
-                checking = false;
-            });
+        ).finally(() => {
+            checking = false;
+        });
     }, env.membershipRecheckIntervalMs);
 
     return () => clearInterval(timer);
@@ -75,32 +113,47 @@ function startMembershipRecheck(
 export function registerChatHandlers(
     io: Server,
     socket: Socket,
-    identity: ChatIdentity
+    identity: ChatIdentity,
+    dependencies: ChatHandlerDependencies = defaultDependencies
 ): void {
+    const joinedRideIds = new Set<string>();
     let stopMembershipRecheck = (): void => undefined;
 
     socket.on("join_ride", async (data: RidePayload | undefined) => {
         try {
-            if (!hasValidRidePayload(data) || data.rideId !== identity.rideId) {
-                sendError(socket, "You cannot join this ride room");
+            const rideId = readRideId(data);
+
+            if (!rideId) {
+                sendError(socket, "A valid ride ID is required");
                 return;
             }
 
-            if (!(await hasChatAccess(identity))) {
-                revokeSocketAccess(
+            if (!(await dependencies.hasChatAccess(rideId, identity.userId))) {
+                revokeRideAccess(
                     socket,
-                    identity.rideId,
-                    "You are no longer a member of this ride"
+                    rideId,
+                    "You are not a member of this ride",
+                    joinedRideIds
                 );
                 return;
             }
 
-            await socket.join(roomName(identity.rideId));
-            stopMembershipRecheck();
-            stopMembershipRecheck = startMembershipRecheck(socket, identity);
+            await socket.join(roomName(rideId));
+            joinedRideIds.add(rideId);
+
+            if (joinedRideIds.size === 1) {
+                stopMembershipRecheck();
+                stopMembershipRecheck = startMembershipRecheck(
+                    socket,
+                    identity,
+                    joinedRideIds,
+                    dependencies.hasChatAccess
+                );
+            }
 
             socket.emit("joined_ride", {
-                roomId: roomName(identity.rideId)
+                rideId,
+                roomId: roomName(rideId)
             });
         } catch (error) {
             sendError(socket, "Unable to join the ride room");
@@ -108,23 +161,56 @@ export function registerChatHandlers(
         }
     });
 
-    socket.on("get_messages", async (data: RidePayload | undefined) => {
+    socket.on("leave_ride", async (data: RidePayload | undefined) => {
         try {
-            if (!hasValidRidePayload(data) || data.rideId !== identity.rideId) {
-                sendError(socket, "Invalid ride room");
+            const rideId = readRideId(data);
+
+            if (!rideId) {
+                sendError(socket, "A valid ride ID is required");
                 return;
             }
 
-            if (!(await hasChatAccess(identity))) {
-                revokeSocketAccess(
+            await socket.leave(roomName(rideId));
+            joinedRideIds.delete(rideId);
+
+            if (joinedRideIds.size === 0) {
+                stopMembershipRecheck();
+                stopMembershipRecheck = (): void => undefined;
+            }
+
+            socket.emit("left_ride", { rideId });
+        } catch (error) {
+            sendError(socket, "Unable to leave the ride room");
+            console.error("Leave ride error:", error);
+        }
+    });
+
+    socket.on("get_messages", async (data: RidePayload | undefined) => {
+        try {
+            const rideId = readRideId(data);
+
+            if (!rideId) {
+                sendError(socket, "A valid ride ID is required");
+                return;
+            }
+
+            if (!(await dependencies.hasChatAccess(rideId, identity.userId))) {
+                revokeRideAccess(
                     socket,
-                    identity.rideId,
-                    "You are no longer a member of this ride"
+                    rideId,
+                    "You are not a member of this ride",
+                    joinedRideIds
                 );
                 return;
             }
 
-            socket.emit("messages", await getRecentMessages(identity.rideId));
+            if (!socket.rooms.has(roomName(rideId))) {
+                sendError(socket, "Join the ride room first");
+                return;
+            }
+
+            const messages = await dependencies.getRecentMessages(rideId);
+            socket.emit("messages", { rideId, messages });
         } catch (error) {
             sendError(socket, "Unable to load messages");
             console.error("Load messages error:", error);
@@ -133,27 +219,34 @@ export function registerChatHandlers(
 
     socket.on("send_message", async (data: RidePayload | undefined) => {
         try {
-            if (!hasValidRidePayload(data) || data.rideId !== identity.rideId) {
-                sendError(socket, "Invalid ride room");
+            const rideId = readRideId(data);
+
+            if (!rideId) {
+                sendError(socket, "A valid ride ID is required");
                 return;
             }
 
-            if (!(await hasChatAccess(identity))) {
-                revokeSocketAccess(
+            if (!(await dependencies.hasChatAccess(rideId, identity.userId))) {
+                revokeRideAccess(
                     socket,
-                    identity.rideId,
-                    "You are no longer a member of this ride"
+                    rideId,
+                    "You are not a member of this ride",
+                    joinedRideIds
                 );
                 return;
             }
 
-            if (!socket.rooms.has(roomName(identity.rideId))) {
+            if (!socket.rooms.has(roomName(rideId))) {
                 sendError(socket, "Join the ride room first");
                 return;
             }
 
-            const message = await createMessage(identity, data.text);
-            io.to(roomName(identity.rideId)).emit("new_message", message);
+            const message = await dependencies.createMessage(
+                rideId,
+                identity.userId,
+                data?.text
+            );
+            io.to(roomName(rideId)).emit("new_message", message);
         } catch (error) {
             const message = error instanceof Error
                 ? error.message

@@ -1,9 +1,7 @@
-export type ChatRole = "creator" | "passenger";
-
 export interface ChatIdentity {
     userId: string;
-    rideId: string;
-    role: ChatRole;
+    /** JWT exp converted from epoch seconds to epoch milliseconds. */
+    expiresAt: number;
 }
 
 export interface RidePayload {

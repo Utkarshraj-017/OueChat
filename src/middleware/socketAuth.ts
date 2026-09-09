@@ -1,7 +1,7 @@
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { Socket } from "socket.io";
 import { env } from "../config/env.js";
-import { ChatIdentity, ChatRole } from "../types/chat.types.js";
+import { ChatIdentity } from "../types/chat.types.js";
 
 export function readChatIdentity(socket: Socket): ChatIdentity {
     const token = socket.handshake.auth?.chatToken;
@@ -19,19 +19,20 @@ export function readChatIdentity(socket: Socket): ChatIdentity {
     }
 
     const payload = decoded as JwtPayload;
-    const role = payload.role as ChatRole;
 
     if (
         typeof payload.sub !== "string" ||
-        typeof payload.rideId !== "string" ||
-        !["creator", "passenger"].includes(role)
+        payload.sub.trim().length === 0 ||
+        typeof payload.exp !== "number" ||
+        !Number.isFinite(payload.exp) ||
+        payload.exp <= Math.floor(Date.now() / 1000) ||
+        payload.scope !== "chat"
     ) {
         throw new Error("Invalid chat token");
     }
 
     return {
         userId: payload.sub,
-        rideId: payload.rideId,
-        role
+        expiresAt: payload.exp * 1000
     };
 }

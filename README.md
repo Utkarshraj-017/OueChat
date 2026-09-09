@@ -16,30 +16,28 @@ a separate chat microservice. The integration works in this order:
 
 ```text
 1. Frontend → Ride backend
-   POST /api/chat/rides/:rideId/session
+   POST /api/chat/session
    Authorization: Bearer <ride-app-token>
 
 2. Ride backend
    - Verifies the logged-in user
-   - Checks the user's ride membership
-   - Creates a short-lived chatToken
+   - Creates a short-lived user-scoped chatToken
 
 3. Frontend → OueChat
    - Opens a Socket.IO connection using chatToken
 
 4. OueChat
    - Verifies the chatToken signature using CHAT_TOKEN_SECRET
-   - Checks token expiry, audience, user ID, and ride ID
-   - Calls the ride backend internally:
-     POST /api/chat/membership/validate
+   - Checks token expiry, audience, scope, and user ID
 
 5. Ride backend
-   - Validates the current membership, ride status, and blacklist status
+   - Validates the current membership, ride status, and blacklist status for
+     the requested ride
    - Returns allowed: true or allowed: false
 
 6. OueChat
-   - Allows the user to join the ride room only when allowed is true
-   - Revalidates membership before loading or sending messages
+   - Revalidates membership before joining, loading, and sending
+   - Allows one socket to join every ride room for which membership is allowed
 ```
 
 The frontend must never call the internal membership endpoint directly. It
@@ -183,31 +181,28 @@ trusted backend must provide these two endpoints.
 The consuming application's authenticated frontend calls its ride backend:
 
 ```http
-POST /api/chat/rides/:rideId/session
+POST /api/chat/session
 Authorization: Bearer <ride-app-access-token>
 ```
 
-The ride backend must verify that the current user is an active member of the
-ride. For the VITravels backend, the ride creator and users with a confirmed
-booking are allowed while the ride is active, in the future, and the user is
-not blacklisted.
+The ride backend must authenticate the current user and issue a short-lived,
+user-scoped token. It must not expose `CHAT_TOKEN_SECRET` to the browser. The
+ride backend and OueChat must use the same `CHAT_TOKEN_SECRET`.
 
 Successful response:
 
 ```json
 {
-  "roomId": "ride:665abc123456789012345678",
-  "rideId": "665abc123456789012345678",
-  "userId": "665def123456789012345678",
-  "role": "creator",
   "chatToken": "<short-lived-jwt>",
   "expiresAt": "2026-01-01T12:05:00.000Z"
 }
 ```
 
-The current VITravels backend issues tokens with a five-minute lifetime.
-`403` means the user cannot access the chat and `404` means the ride does not
-exist.
+The current VITravels backend should use a short lifetime such as five
+minutes. If the existing endpoint
+`POST /api/chat/rides/:rideId/session` is still required for compatibility, it
+may continue checking that ride during session creation, but its token must
+still be user-scoped and must not contain a ride ID or role.
 
 ### 2. Validate membership internally
 
@@ -256,16 +251,22 @@ OueChat through the Socket.IO handshake. OueChat verifies:
 ```json
 {
   "sub": "<userId>",
-  "rideId": "<rideId>",
-  "role": "creator | passenger",
   "aud": "ouechat",
+  "scope": "chat",
+  "iat": "<issued timestamp>",
   "exp": "<expiry timestamp>"
 }
 ```
 
 The signing secret is `CHAT_TOKEN_SECRET`. The browser must not mint or edit
-this token. A token is scoped to one ride; the socket rejects attempts to use
-it with another ride ID.
+this token. The token identifies only the user. It does not authorize any
+particular ride; OueChat validates the user's membership separately for each
+requested ride and operation.
+
+OueChat rejects an invalid or expired token during the handshake. It also
+disconnects a connected socket when the token expires, so an expired socket
+cannot continue sending chat operations or receiving room broadcasts. The
+frontend must request a new token and reconnect when this happens.
 
 ## Socket.IO client integration
 
@@ -292,8 +293,18 @@ Join the ride room:
 
 ```ts
 socket.emit("join_ride", { rideId });
-socket.on("joined_ride", ({ roomId }) => {
+socket.on("joined_ride", ({ rideId, roomId }) => {
   console.log(`Joined ${roomId}`);
+});
+```
+
+The same socket may join multiple rides. To stop receiving live messages for
+one ride, leave only that room:
+
+```ts
+socket.emit("leave_ride", { rideId });
+socket.on("left_ride", ({ rideId }) => {
+  console.log(`Left ${rideId}`);
 });
 ```
 
@@ -301,8 +312,8 @@ Load recent messages:
 
 ```ts
 socket.emit("get_messages", { rideId });
-socket.on("messages", (messages) => {
-  console.log(messages);
+socket.on("messages", ({ rideId, messages }) => {
+  console.log(rideId, messages);
 });
 ```
 
@@ -336,9 +347,11 @@ socket.on("chat_access_revoked", ({ rideId, message }) => {
 | Direction | Event | Payload or result |
 | --- | --- | --- |
 | Client to server | `join_ride` | `{ rideId }` |
-| Server to client | `joined_ride` | `{ roomId }` |
+| Server to client | `joined_ride` | `{ rideId, roomId }` |
+| Client to server | `leave_ride` | `{ rideId }` |
+| Server to client | `left_ride` | `{ rideId }` |
 | Client to server | `get_messages` | `{ rideId }` |
-| Server to client | `messages` | Array of stored messages |
+| Server to client | `messages` | `{ rideId, messages }` |
 | Client to server | `send_message` | `{ rideId, text }` |
 | Server to room | `new_message` | `{ id, rideId, senderId, text, createdAt }` |
 | Server to client | `chat_error` | `{ message }` |
@@ -349,11 +362,14 @@ Current limits:
 - Messages are trimmed and limited to 1,000 characters.
 - `get_messages` returns at most the latest 100 messages, ordered oldest to
   newest.
-- A user must join the room before sending a message.
-- Membership is revalidated before every join, read, and send operation.
-- After joining, membership is revalidated periodically. If the ride backend
-  returns `allowed: false`, OueChat emits `chat_access_revoked`, removes the
-  socket from the ride room, and disconnects it.
+- A user must join the requested room before loading or sending messages.
+- Membership is revalidated for the requested ride before every join, read,
+  and send operation.
+- After joining, membership is revalidated periodically for every joined ride.
+  If access to one ride is revoked, OueChat emits `chat_access_revoked` and
+  removes the socket from that ride only.
+- Separate devices use separate Socket.IO connections. All sockets that are
+  members of the same room receive that room's new messages.
 
 The room name is derived by the server as `ride:<rideId>`. Clients should use
 the `roomId` returned by `joined_ride` for display only and must not attempt to
@@ -395,14 +411,16 @@ Before connecting a new application, confirm:
 
 1. The application has a trusted backend that can verify its own user and ride
    membership.
-2. That backend issues tokens containing `sub`, `rideId`, and `role`, signed
-   with the OueChat `CHAT_TOKEN_SECRET` and audience `ouechat`.
+2. That backend issues short-lived user-scoped tokens containing `sub`,
+   `aud: ouechat`, `scope: chat`, `iat`, and `exp`, signed with the OueChat
+   `CHAT_TOKEN_SECRET`.
 3. OueChat can reach the backend's membership endpoint using
    `CHAT_SERVICE_SECRET`.
 4. The chat frontend origin is configured in `FRONTEND_URL`.
-5. The frontend requests a new chat session instead of placing a token in a
-   URL or storing it permanently.
-6. The frontend handles `chat_error`, disconnects, and token expiry.
+5. The frontend requests one chat session per socket instead of placing a
+   token in a URL or storing it permanently.
+6. The frontend handles multiple joined rides, `left_ride`, `chat_error`,
+   disconnects, and token expiry by requesting a new token and reconnecting.
 
 If another application uses a different user or ride system, it must expose a
 membership endpoint with the same behavior or add a trusted adapter. OueChat

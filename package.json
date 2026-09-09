@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
+    "test": "tsc -p tsconfig.test.json && node --import ./test/test-preload.mjs --test dist-test/test/*.test.js",
     "start": "node dist/server.js"
   },
   "dependencies": {
