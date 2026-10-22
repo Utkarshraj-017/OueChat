@@ -251,6 +251,7 @@ OueChat through the Socket.IO handshake. OueChat verifies:
 ```json
 {
   "sub": "<userId>",
+  "name": "<sender display name>",
   "aud": "ouechat",
   "scope": "chat",
   "iat": "<issued timestamp>",
@@ -259,9 +260,9 @@ OueChat through the Socket.IO handshake. OueChat verifies:
 ```
 
 The signing secret is `CHAT_TOKEN_SECRET`. The browser must not mint or edit
-this token. The token identifies only the user. It does not authorize any
-particular ride; OueChat validates the user's membership separately for each
-requested ride and operation.
+this token. The `name` claim is the trusted sender display name used in chat
+messages. The token does not authorize any particular ride; OueChat validates
+the user's membership separately for each requested ride and operation.
 
 OueChat rejects an invalid or expired token during the handshake. It also
 disconnects a connected socket when the token expires, so an expired socket
@@ -342,6 +343,22 @@ socket.on("chat_access_revoked", ({ rideId, message }) => {
 });
 ```
 
+### Frontend developer summary
+
+- The frontend connects with the `chatToken` returned by the ride backend.
+- The chat token must contain a trusted `name` claim. The frontend must not
+  create or modify this token.
+- Join a ride before loading or sending messages:
+  `socket.emit("join_ride", { rideId })`.
+- Load history with `socket.emit("get_messages", { rideId })` and listen for
+  `messages`, which returns `{ rideId, messages }`.
+- Send with `socket.emit("send_message", { rideId, text })`. There is no direct
+  acknowledgement; listen for `new_message`.
+- Each `new_message` item contains `id`, `rideId`, `senderId`, `senderName`,
+  `text`, and `createdAt`. Use `senderName` to display the author.
+- Listen for `chat_error` for validation or server errors and
+  `chat_access_revoked` when the user loses access to a ride.
+
 ### Events
 
 | Direction | Event | Payload or result |
@@ -353,7 +370,7 @@ socket.on("chat_access_revoked", ({ rideId, message }) => {
 | Client to server | `get_messages` | `{ rideId }` |
 | Server to client | `messages` | `{ rideId, messages }` |
 | Client to server | `send_message` | `{ rideId, text }` |
-| Server to room | `new_message` | `{ id, rideId, senderId, text, createdAt }` |
+| Server to room | `new_message` | `{ id, rideId, senderId, senderName, text, createdAt }` |
 | Server to client | `chat_error` | `{ message }` |
 | Server to client | `chat_access_revoked` | `{ rideId, message }` |
 

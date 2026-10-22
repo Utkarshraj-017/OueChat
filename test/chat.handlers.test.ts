@@ -60,6 +60,7 @@ class FakeIo {
 function identity(): ChatIdentity {
     return {
         userId: "user-1",
+        senderName: "Alex User",
         expiresAt: Date.now() + 60_000
     };
 }
@@ -69,6 +70,7 @@ function message(rideId: string, text = "hello"): StoredMessage {
         id: `${rideId}-message`,
         rideId,
         senderId: "user-1",
+        senderName: "Alex User",
         text,
         createdAt: new Date()
     };
@@ -87,10 +89,12 @@ function dependencies(allowedRides: Set<string>) {
         createMessage: async (
             rideId: string,
             userId: string,
+            senderName: string,
             text: unknown
         ) => ({
             ...message(rideId, String(text)),
-            senderId: userId
+            senderId: userId,
+            senderName
         })
     };
 }
@@ -246,6 +250,10 @@ test("all sockets in a ride room receive that ride's messages", async () => {
     assert.equal(secondSocket.messages("new_message").length, 1);
     assert.equal(otherRideSocket.messages("new_message").length, 0);
     assert.deepEqual(firstSocket.messages("new_message"), secondSocket.messages("new_message"));
+    assert.equal(
+        (firstSocket.messages("new_message")[0] as StoredMessage).senderName,
+        "Alex User"
+    );
 
     await firstSocket.trigger("disconnect");
     await secondSocket.trigger("disconnect");

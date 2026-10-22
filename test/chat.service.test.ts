@@ -11,6 +11,7 @@ test("getRecentMessages queries the latest 100 and returns display order", async
             _id: { toString: () => `message-${messageNumber}` },
             rideId: "ride1",
             senderId: "user-1",
+            senderName: "Alex User",
             text: `message ${messageNumber}`,
             createdAt: new Date(2026, 0, 1, 0, 0, messageNumber)
         };
@@ -43,6 +44,7 @@ test("getRecentMessages queries the latest 100 and returns display order", async
         assert.equal(messages[0]?.id, "message-20");
         assert.equal(messages.at(-1)?.id, "message-119");
         assert.equal(messages[0]?.rideId, "ride1");
+        assert.equal(messages[0]?.senderName, "Alex User");
     } finally {
         Object.defineProperty(Message, "find", {
             configurable: true,

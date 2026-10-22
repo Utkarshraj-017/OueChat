@@ -26,6 +26,7 @@ export async function getRecentMessages(
         id: message._id.toString(),
         rideId: message.rideId,
         senderId: message.senderId,
+        senderName: message.senderName || message.senderId,
         text: message.text,
         createdAt: message.createdAt
     }));
@@ -34,6 +35,7 @@ export async function getRecentMessages(
 export async function createMessage(
     rideId: string,
     userId: string,
+    senderName: string,
     text: unknown
 ): Promise<StoredMessage> {
     if (typeof text !== "string" || !text.trim()) {
@@ -51,6 +53,7 @@ export async function createMessage(
     const message = await Message.create({
         rideId,
         senderId: userId,
+        senderName,
         text: normalizedText
     });
 
@@ -58,6 +61,7 @@ export async function createMessage(
         id: message._id.toString(),
         rideId: message.rideId,
         senderId: message.senderId,
+        senderName: message.senderName,
         text: message.text,
         createdAt: message.createdAt
     };

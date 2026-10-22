@@ -22,6 +22,7 @@ export interface ChatHandlerDependencies {
     createMessage: (
         rideId: string,
         userId: string,
+        senderName: string,
         text: unknown
     ) => Promise<StoredMessage>;
 }
@@ -244,6 +245,7 @@ export function registerChatHandlers(
             const message = await dependencies.createMessage(
                 rideId,
                 identity.userId,
+                identity.senderName,
                 data?.text
             );
             io.to(roomName(rideId)).emit("new_message", message);

@@ -20,6 +20,7 @@ function createToken(overrides: Record<string, unknown> = {}): string {
     return jwt.sign(
         {
             sub: "user-1",
+            name: "Alex User",
             aud: "ouechat",
             scope: "chat",
             iat: now,
@@ -34,6 +35,7 @@ test("accepts a valid user-scoped chat token", () => {
     const identity = readChatIdentity(socketWithToken(createToken()));
 
     assert.equal(identity.userId, "user-1");
+    assert.equal(identity.senderName, "Alex User");
     assert.ok(identity.expiresAt > Date.now());
 });
 
@@ -49,6 +51,7 @@ test("rejects an expired JWT", () => {
     const token = jwt.sign(
         {
             sub: "user-1",
+            name: "Alex User",
             aud: "ouechat",
             scope: "chat",
             iat: now - 120,
