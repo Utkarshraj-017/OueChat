@@ -1,0 +1,10 @@
+services:
+  ouechat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-4000}:${PORT:-4000}"
+    restart: unless-stopped
